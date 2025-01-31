@@ -1,0 +1,40 @@
+
+### 
+POST http://localhost:5000/login
+Content-Type: application/json
+
+{
+  "table": "users",
+  "username": "user123",
+  "password": "password"
+}
+
+###
+
+POST http://localhost:5000/register
+Content-Type: application/json
+
+{
+  "email": "example@gmail.com",
+  "username": "user1234",
+  "password": "password"
+}
+
+###
+
+PATCH http://localhost:5000/updateUser/user123
+Content-Type: application/json
+
+{
+  "username": "user123",
+  "email": "example@gmail.com",
+  "display_name": "UserEx"
+}
+
+###
+
+GET http://localhost:5000/getUser/user123
+
+###
+
+GET http://localhost:5000/getProduct

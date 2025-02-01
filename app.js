@@ -5,6 +5,9 @@ const hashpassword = require('./tools/genhashpassword')
 const rateLimit = require('express-rate-limit');
 const dayjs = require('dayjs');
 const cors = require('cors');
+const multer = require('multer');
+const fs = require('fs'); // To rename files
+const path = require('path');
 
 let corsOptions = {
     origin: '*',
@@ -25,6 +28,19 @@ const limiter = rateLimit({
 
 // Apply the rate limiting middleware to all requests.
 app.use(limiter)
+
+const storage = multer.diskStorage({
+    destination: function (req, file, cb) {
+        cb(null, './products/'); // Specify the folder to save images
+    },
+    filename: function (req, file, cb) {
+        // Use a temporary name for now
+        const tempName = Date.now() + '-' + Math.random().toString(36).substr(2, 9); // Temporary unique name
+        cb(null, `${tempName}.png`); // Temporary filename
+    }
+});
+
+const upload = multer({ storage: storage });
 
 //MySQL connection
 async function connectToSQL() {
@@ -345,6 +361,43 @@ app.get('/getSingleOrder/:orderID', async (req,res)=>{
         res.status(500).json( { message: 'Internal server error! '} );
     }
 })
+
+// Product Control
+app.post('/create-product', upload.single('image'), async (req, res)=> {
+    try {
+        const {productName, description, producType, productPrice} = req.body;    
+
+        //DB operation - check username exist
+        const DBOP = await connectToSQL();
+        let query =  'SELECT generate_unique_random_ProductsID() AS randomID'; // Get a random to be ORDER ID
+        const [random_ID] = await DBOP.query(query);
+        const productID = random_ID[0].randomID; // Accessing the randomID directly
+
+        // Rename the uploaded image using productID
+        const tempFilePath = path.join(__dirname, './products/', req.file.filename);
+        const newFilePath = path.join(__dirname, './products/', `${productID}${path.extname(req.file.originalname)}`);
+        
+        fs.rename(tempFilePath, newFilePath, (err) => {
+            if (err) {
+                console.error('Error renaming file:', err);
+                return res.status(500).json({ error: 'Error renaming file' });
+            }
+        });
+
+        query = 'INSERT INTO products (productID, name, description, type, price) VALUES (?, ?, ?, ?, ?)';
+        [results] = await DBOP.query(query, [productID, productName, description, producType, productPrice]);
+
+        await DBOP.end(function(err) {
+            if (err) throw err; // Handle any errors during closing
+        });
+        res.status(200).json({ message: "Your product created successfully!" })
+       
+    } catch (error) {
+        console.log(error);
+        res.status(500).json( { error: 'Internal Server Error' } );
+    }
+})
+
 
 // Start the server
 app.listen(5000, () => {

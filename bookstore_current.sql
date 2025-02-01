@@ -70,7 +70,6 @@ CREATE TABLE ordersProducts (
 );
 
 DELIMITER $$
-
 CREATE FUNCTION generate_unique_random_OrdersID() 
 RETURNS VARCHAR(16) 
 DETERMINISTIC 
@@ -90,5 +89,26 @@ BEGIN
 
     RETURN random_id;
 END $$
+DELIMITER ;
 
+DELIMITER $$
+CREATE FUNCTION generate_unique_random_ProductsID() 
+RETURNS VARCHAR(16) 
+DETERMINISTIC 
+BEGIN
+    DECLARE random_id VARCHAR(16);
+    DECLARE id_exists INT DEFAULT 1;
+
+    WHILE id_exists = 1 DO
+        SET random_id = '';
+        WHILE LENGTH(random_id) < 16 DO
+            SET random_id = CONCAT(random_id, SUBSTRING('0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ', FLOOR(RAND() * 62) + 1, 1));
+        END WHILE;
+
+        -- Check if the generated ID already exists in the Order table
+        SELECT COUNT(*) INTO id_exists FROM products WHERE productID = random_id;
+    END WHILE;
+
+    RETURN random_id;
+END $$
 DELIMITER ;

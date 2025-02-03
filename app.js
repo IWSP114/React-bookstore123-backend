@@ -16,7 +16,7 @@ let corsOptions = {
     method: ['GET', 'POST', 'OPTION', 'PUT', 'DELETE', 'PUTCH']
   }
 app.use(cors(corsOptions));
-
+app.use('/products', express.static(path.join(__dirname, 'products')));
 
 const limiter = rateLimit({
 	windowMs: 60 * 1000, // 15 minutes
@@ -36,7 +36,7 @@ const storage = multer.diskStorage({
     filename: function (req, file, cb) {
         // Use a temporary name for now
         const tempName = Date.now() + '-' + Math.random().toString(36).substr(2, 9); // Temporary unique name
-        cb(null, `${tempName}.png`); // Temporary filename
+        cb(null, `${tempName}.jpg`); // Temporary filename
     }
 });
 
@@ -80,7 +80,6 @@ app.post('/login', async (req, res)=> {
         const DBOP = await connectToSQL();
         const query = `SELECT * FROM ?? WHERE username = ?;`;
         const [results] = await DBOP.query(query, [data.table,data.username]);
-        console.log(results);
 
         await DBOP.end(function(err) {
             if (err) throw err; // Handle any errors during closing
@@ -235,6 +234,9 @@ app.get('/getUser/:username' ,async (req,res)=> {
         await DBOP.end(function(err) {
             if (err) throw err; // Handle any errors during closing
         });
+
+
+
         res.status(200).json({ userdata: results })
     } catch (error) {
         console.log(error);
@@ -253,7 +255,14 @@ app.get('/getProduct', async (req,res)=>{
             if (err) throw err; // Handle any errors during closing
 
         });
-        res.status(200).json({ Products: results })
+
+        // Construct full image URLs
+        const productsWithImages = results.map(product => ({
+            ...product,
+            imageUrl: `http://localhost:5000/products/${product.productID}.jpg` // Adjust the URL as necessary
+        }));
+
+        res.status(200).json({ Products: productsWithImages })
     } catch (error) {
         console.log(error);
         res.status(500).json( { message: 'Internal server error! '} );
@@ -272,7 +281,12 @@ app.get('/getProduct/:productID', async (req,res)=>{
             if (err) throw err; // Handle any errors during closing
 
         });
-        res.status(200).json({ Products: results })
+        const productsWithImages = results.map(product => ({
+            ...product,
+            imageUrl: `http://localhost:5000/products/${product.productID}.jpg` // Adjust the URL as necessary
+        }));
+
+        res.status(200).json({ Products: productsWithImages })
     } catch (error) {
         console.log(error);
         res.status(500).json( { message: 'Internal server error! '} );
@@ -282,9 +296,8 @@ app.get('/getProduct/:productID', async (req,res)=>{
 app.post('/create-order', async (req,res) => {
     try {
 
-        const {customerID, cart, price, total} = req.body;
+        const {customerID, cart, subtotal, shipping, total} = req.body;
         const formattedDate = dayjs().format('YYYY-MM-DD');
-        console.log(formattedDate);
 
         const DBOP = await connectToSQL();
 
@@ -292,8 +305,8 @@ app.post('/create-order', async (req,res) => {
         const [random_ID] = await DBOP.query(query);
         const orderID = random_ID[0].randomID; // Accessing the randomID directly
 
-        query = 'INSERT INTO orders (ordersID, customerID, ordersDate, totalPrices, totalAmounts) VALUES (?, ?, ?, ?, ?)';
-        [results] = await DBOP.query(query, [orderID, customerID, formattedDate, price, total]);
+        query = 'INSERT INTO orders (ordersID, customerID, ordersDate, subtotalPrice, shippingPrice,totalAmounts) VALUES (?, ?, ?, ?, ?, ?)';
+        [results] = await DBOP.query(query, [orderID, customerID, formattedDate, subtotal, shipping, total]);
 
         cart.forEach(async cartItem => {
             query = 'INSERT INTO ordersProducts (ordersID, productID, quantity) VALUES (?, ?, ?)';
@@ -316,14 +329,13 @@ app.get('/getOrder/:userID', async (req,res)=>{
     try {
         const userID = req.params.userID;
         const DBOP = await connectToSQL();
-        const query = 'SELECT ordersID, customerID, ordersDate, totalPrices, totalAmounts FROM orders WHERE customerID = ?';
+        const query = 'SELECT ordersID, customerID, ordersDate, subtotalPrice, shippingPrice, totalAmounts FROM orders WHERE customerID = ?';
         const [results] = await DBOP.query(query, [userID]);
 
         await DBOP.end(function(err) {
             if (err) throw err; // Handle any errors during closing
 
         });
-        console.log(results);
         res.status(200).json({ data: results })
     } catch (error) {
         console.log(error);
@@ -342,9 +354,9 @@ app.get('/getSingleOrder/:orderID', async (req,res)=>{
             SELECT ordersProducts.ordersID as ordersID, 
             ordersProducts.productID as productID, 
             ordersProducts.quantity as productQuantity, 
-            products.name as productName, 
+            products.name as productName,
             products.price as productPrice 
-            FROM ordersProducts 
+            FROM ordersProducts
             RIGHT JOIN products ON ordersProducts.productID = products.productID 
             WHERE ordersID = ?;
         `;
@@ -354,7 +366,6 @@ app.get('/getSingleOrder/:orderID', async (req,res)=>{
             if (err) throw err; // Handle any errors during closing
 
         });
-        console.log(results);
         res.status(200).json({ data: results, products: products })
     } catch (error) {
         console.log(error);
@@ -367,7 +378,7 @@ app.post('/create-product', upload.single('image'), async (req, res)=> {
     try {
         const {productName, description, producType, productPrice} = req.body;    
 
-        //DB operation - check username exist
+        //DB operation
         const DBOP = await connectToSQL();
         let query =  'SELECT generate_unique_random_ProductsID() AS randomID'; // Get a random to be ORDER ID
         const [random_ID] = await DBOP.query(query);
@@ -392,6 +403,75 @@ app.post('/create-product', upload.single('image'), async (req, res)=> {
         });
         res.status(200).json({ message: "Your product created successfully!" })
        
+    } catch (error) {
+        console.log(error);
+        res.status(500).json( { error: 'Internal Server Error' } );
+    }
+})
+
+// Wishlist
+app.get('/api/get-wish-list-by-productID/:productID/:userID', async (req, res) => {
+     
+    const userID = req.params.userID;
+    const productID = req.params.productID;  
+
+    try {
+        //DB operation
+        const DBOP = await connectToSQL();
+        
+        let query =  'SELECT * FROM wishList WHERE productID = ? AND userID = ? LIMIT 1'; // Get a random to be ORDER ID
+        const [result] = await DBOP.query(query, [productID, userID]);
+
+        await DBOP.end(function(err) {
+            if (err) throw err; // Handle any errors during closing
+
+        });
+
+        res.status(200).json({ result: result[0] });
+    } catch (error) {
+        console.log(error);
+        res.status(500).json( { error: 'Internal Server Error' } );
+    }
+})
+
+app.post('/api/add-to-wishlist', async (req, res) => {
+
+    const {userID, productID} = req.body;
+    try {
+        //DB operation
+        const DBOP = await connectToSQL();
+        let query =  'INSERT INTO wishList (productID, userID) VALUES (?, ?);'; // Get a random to be ORDER ID
+        const [result] = await DBOP.query(query, [productID, userID]);
+
+        await DBOP.end(function(err) {
+            if (err) throw err; // Handle any errors during closing
+
+        });
+
+        res.status(200).json({ message: "Success!" });
+    } catch (error) {
+        console.log(error);
+        res.status(500).json( { error: 'Internal Server Error' } );
+    }
+})
+
+app.delete('/api/delete-from-wishlist', async (req, res) => {
+
+    const {userID, productID} = req.body;
+    console.log(userID);
+    console.log(productID);
+    try {
+        //DB operation
+        const DBOP = await connectToSQL();
+        let query =  'DELETE FROM wishList WHERE productID = ? AND userID = ?;'; // Get a random to be ORDER ID
+        const [result] = await DBOP.query(query, [productID, userID]);
+
+        await DBOP.end(function(err) {
+            if (err) throw err; // Handle any errors during closing
+
+        });
+
+        res.status(200).json({ message: "Success!" });
     } catch (error) {
         console.log(error);
         res.status(500).json( { error: 'Internal Server Error' } );

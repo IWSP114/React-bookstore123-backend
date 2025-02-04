@@ -376,7 +376,7 @@ app.get('/getSingleOrder/:orderID', async (req,res)=>{
 // Product Control
 app.post('/create-product', upload.single('image'), async (req, res)=> {
     try {
-        const {productName, description, producType, productPrice} = req.body;    
+        const {productName, productAuthor, description, producType, productPrice, productStock} = req.body;    
 
         //DB operation
         const DBOP = await connectToSQL();
@@ -395,8 +395,8 @@ app.post('/create-product', upload.single('image'), async (req, res)=> {
             }
         });
 
-        query = 'INSERT INTO products (productID, name, description, type, price) VALUES (?, ?, ?, ?, ?)';
-        [results] = await DBOP.query(query, [productID, productName, description, producType, productPrice]);
+        query = 'INSERT INTO products (productID, name, author, description, type, price, stock) VALUES (?, ?, ?, ?, ?, ?, ?)';
+        [results] = await DBOP.query(query, [productID, productName, productAuthor, description, producType, productPrice, productStock]);
 
         await DBOP.end(function(err) {
             if (err) throw err; // Handle any errors during closing
@@ -408,6 +408,48 @@ app.post('/create-product', upload.single('image'), async (req, res)=> {
         res.status(500).json( { error: 'Internal Server Error' } );
     }
 })
+
+app.delete('/api/delete-from-products', async (req, res) => {
+    const { productID } = req.body;
+
+    if (!productID) {
+        return res.status(400).json({ error: 'Product ID is required' });
+    }
+
+    try {
+        // DB operation
+        const DBOP = await connectToSQL();
+        
+        // Disable foreign key checks
+        await DBOP.query('SET foreign_key_checks = 0;');
+
+        // Delete the product from the database
+        await DBOP.query('DELETE FROM products WHERE productID = ?;', [productID]);
+
+        // Re-enable foreign key checks
+        await DBOP.query('SET foreign_key_checks = 1;');
+
+        // Close the database connection
+        await DBOP.end();
+
+        // Construct the image path
+        const imagePath = path.join(__dirname, 'products', `${productID}.jpg`); // Use path.join for cross-platform compatibility
+
+        // Delete the image file
+        fs.unlink(imagePath, (err) => {
+            if (err) {
+                console.error(`Error deleting file: ${err.message}`);
+                return res.status(500).json({ error: 'Error deleting image' });
+            }
+            console.log('Image deleted successfully!');
+            res.status(200).json({ message: "Success!" });
+        });
+
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ error: 'Internal Server Error' });
+    }
+});
 
 // Wishlist
 app.get('/api/get-wish-list-by-productID/:productID/:userID', async (req, res) => {
@@ -478,6 +520,44 @@ app.delete('/api/delete-from-wishlist', async (req, res) => {
     }
 })
 
+app.get('/api/get-all-wish-list/:userID', async (req, res) => {
+     
+    const userID = req.params.userID;
+
+    try {
+        //DB operation
+        const DBOP = await connectToSQL();
+        
+        let query =  `
+        SELECT 
+            wishList.productID as productID, 
+            wishList.userID as userID, 
+            products.name as productName, 
+            products.author as productAuthor, 
+            products.type as productType, 
+            products.price as productPrice,
+            products.stock as productStock
+        FROM wishList
+        LEFT JOIN products ON wishList.productID=products.productID
+        WHERE wishList.userID = ?;
+        `
+        const [result] = await DBOP.query(query, [userID]);
+
+        await DBOP.end(function(err) {
+            if (err) throw err; // Handle any errors during closing
+        });
+
+        const productsWithImages = result.map(product => ({
+            ...product,
+            imageUrl: `http://localhost:5000/products/${product.productID}.jpg` // Adjust the URL as necessary
+        }));
+
+        res.status(200).json({ products: productsWithImages });
+    } catch (error) {
+        console.log(error);
+        res.status(500).json( { error: 'Internal Server Error' } );
+    }
+})
 
 // Start the server
 app.listen(5000, () => {

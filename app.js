@@ -294,42 +294,72 @@ app.get('/getProduct/:productID', async (req,res)=>{
 })
 
 app.post('/create-order', async (req,res) => {
+    let DBOP
     try {
 
         const {customerID, cart, subtotal, shipping, total} = req.body;
         const formattedDate = dayjs().format('YYYY-MM-DD');
 
-        const DBOP = await connectToSQL();
+        DBOP = await connectToSQL();
 
         let query =  'SELECT generate_unique_random_OrdersID() AS randomID'; // Get a random to be ORDER ID
         const [random_ID] = await DBOP.query(query);
         const orderID = random_ID[0].randomID; // Accessing the randomID directly
 
-        query = 'INSERT INTO orders (ordersID, customerID, ordersDate, subtotalPrice, shippingPrice,totalAmounts) VALUES (?, ?, ?, ?, ?, ?)';
-        [results] = await DBOP.query(query, [orderID, customerID, formattedDate, subtotal, shipping, total]);
+        await DBOP.beginTransaction();
 
-        cart.forEach(async cartItem => {
-            query = 'INSERT INTO ordersProducts (ordersID, productID, quantity) VALUES (?, ?, ?)';
-            [results] = await DBOP.query(query, [orderID, cartItem.productID, cartItem.quantity]);
-        });
+        const [addOrder] = await DBOP.execute(
+            'INSERT INTO orders (ordersID, customerID, ordersDate, subtotalPrice, shippingPrice,totalAmounts) VALUES (?, ?, ?, ?, ?, ?)', 
+            [orderID, customerID, formattedDate, subtotal, shipping, total]
+        );
+        if (addOrder.affectedRows === 0) {
+            throw new Error('Invalid destination orders');
+        }
 
-        res.status(200).json({ message: "Your order placed successfully!" })
+        for (const cartItem of cart) {
+            const [addOrderProducts] = await DBOP.execute(
+                'INSERT INTO ordersProducts (ordersID, productID, productName, quantity) VALUES (?, ?, ?, ?)',
+                [orderID, cartItem.productID, cartItem.name, cartItem.quantity]
+            );
+            if (addOrderProducts.affectedRows === 0) {
+                throw new Error('Invalid destination products');
+            }
 
-        await DBOP.end(function(err) {
-            if (err) throw err; // Handle any errors during closing
+            const [minusStocks] = await DBOP.execute(
+                'UPDATE products SET stock = stock - ? WHERE productID = ? AND stock >= ?',
+                [cartItem.quantity, cartItem.productID, cartItem.quantity]
+            );
+            if (minusStocks.affectedRows === 0) {
+                throw new Error('Not enough stock for product');
+            }
+        }
+        await DBOP.commit();
 
-        });
+        return res.status(200).json({ message: "Your order placed successfully!" })
     } catch (error){  
-        console.log(error);
-        res.status(500).json( { message: 'Internal server error! '} );
+        if (DBOP) { // Only rollback if a connection was established
+            await DBOP.rollback();
+        }
+        console.error('Transaction failed:', error);
+        res.status(500).json({ message: "Out of stock!" })
+    } finally {
+        // Always release the connection
+        if (DBOP) {
+            try {
+                await DBOP.end();
+            } catch (endError) {
+                console.error("Connection end failed:", endError);
+            }
+        }
     }
 })
+
 
 app.get('/getOrder/:userID', async (req,res)=>{
     try {
         const userID = req.params.userID;
         const DBOP = await connectToSQL();
-        const query = 'SELECT ordersID, customerID, ordersDate, subtotalPrice, shippingPrice, totalAmounts FROM orders WHERE customerID = ?';
+        const query = 'SELECT ordersID, customerID, ordersDate, subtotalPrice, orderStatus, shippingPrice, totalAmounts FROM orders WHERE customerID = ?';
         const [results] = await DBOP.query(query, [userID]);
 
         await DBOP.end(function(err) {
@@ -451,6 +481,100 @@ app.delete('/api/delete-from-products', async (req, res) => {
     }
 });
 
+app.patch('/api/product-edit', async (req, res)=> { 
+    try {
+        const { productID, productName, productType, productAuthor, productPrice, productDescription, productStock } = req.body; 
+        if(!req.body) {
+            res.status(400).json({message: 'Please make a change on profile.'});
+        }
+        //DB operation - check if the user already exist by using jwt token from front end server
+        let DBOP = await connectToSQL();
+        let query = `UPDATE products SET name = ?, author = ?, description = ?, type = ?, price = ?, stock = ? WHERE productID = ?`;
+        let [results] = await DBOP.query(query, [productName, productAuthor, productDescription, productType,  productPrice, productStock, productID]);
+
+        await DBOP.end(function(err) {
+            if (err) throw err; // Handle any errors during closing
+        });
+        res.status(200).json( { message: "Success!"} );
+
+    } catch (error) {  
+        console.log(error);
+        res.status(500).json( { error: error.message } );
+    }
+})
+
+// Order Control
+app.get('/api/getOrder', async (req,res)=>{
+    try {
+        const DBOP = await connectToSQL();
+        const query = 
+        `
+        SELECT ordersID, customerID, users.username as customerName, ordersDate, orderStatus, subtotalPrice, shippingPrice, totalAmounts 
+        FROM orders
+        LEFT JOIN users
+        ON orders.customerID = users.id;
+        `;
+        const [results] = await DBOP.query(query);
+
+        await DBOP.end(function(err) {
+            if (err) throw err; // Handle any errors during closing
+
+        });
+        res.status(200).json({ data: results })
+    } catch (error) {
+        console.log(error);
+        res.status(500).json( { message: 'Internal server error! '} );
+    }
+})
+
+app.patch('/api/updateOrder/:status/:orderID', async (req,res)=>{
+    try {
+        const orderID = req.params.orderID;
+        const status = req.params.status;
+        const DBOP = await connectToSQL();
+        const query = 
+        `
+        UPDATE orders
+        SET orderStatus = ?
+        WHERE ordersID = ?
+        `;
+        await DBOP.query(query, [status, orderID]);
+
+        await DBOP.end(function(err) {
+            if (err) throw err; // Handle any errors during closing
+
+        });
+        res.status(200).json({ message: "Success!" })
+    } catch (error) {
+        console.log(error);
+        res.status(500).json( { message: 'Internal server error! '} );
+    }
+})
+
+// Feed back
+app.post('/api/create-feedback', async (req,res) => {
+    let DBOP
+    try {
+
+        const {userID, feedback} = req.body;
+
+        DBOP = await connectToSQL();
+
+        let query =  'INSERT INTO feedbacks (userID, feedback) VALUES (?, ?)'; // Get a random to be ORDER ID
+        await DBOP.query(query, [userID, feedback]);
+        
+        await DBOP.end(function(err) {
+            if (err) throw err; // Handle any errors during closing
+
+        });
+        res.status(200).json({ message: "Success!" })
+
+    } catch (error){  
+        console.log(error);
+        res.status(500).json( { message: 'Internal server error! '} );
+    }
+})
+
 // Wishlist
 app.get('/api/get-wish-list-by-productID/:productID/:userID', async (req, res) => {
      
@@ -466,7 +590,6 @@ app.get('/api/get-wish-list-by-productID/:productID/:userID', async (req, res) =
 
         await DBOP.end(function(err) {
             if (err) throw err; // Handle any errors during closing
-
         });
 
         res.status(200).json({ result: result[0] });

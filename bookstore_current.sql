@@ -2,11 +2,13 @@ USE bookstore;
 
 DROP FUNCTION IF EXISTS generate_unique_random_OrdersID;
 DROP FUNCTION IF EXISTS generate_unique_random_ProductsID;
+DROP TABLE IF EXISTS feedbacks;
 DROP TABLE IF EXISTS ordersProducts;
 DROP TABLE IF EXISTS orders;
 DROP TABLE IF EXISTS wishlist;
 DROP TABLE IF EXISTS products;
 DROP TABLE IF EXISTS users;
+DROP TABLE IF EXISTS staff;
 
 
 CREATE TABLE IF NOT EXISTS users (
@@ -16,6 +18,14 @@ CREATE TABLE IF NOT EXISTS users (
     password VARCHAR(255) NOT NULL,
     email VARCHAR(255) UNIQUE
 );
+
+CREATE TABLE IF NOT EXISTS staff (
+    id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    username VARCHAR(255) UNIQUE NOT NULL,
+    display_name VARCHAR(255) UNIQUE NOT NULL,
+    password VARCHAR(255) NOT NULL
+);
+INSERT INTO staff (username, display_name, password) VALUES ('staff', 'staff', '$2a$10$uUJGW6TVnOTkazes1af/aO2ohWAOXLOQfEbR84mWg7psVnHQgy1k.');
 
 DELIMITER //
 CREATE TRIGGER before_insert_user
@@ -40,6 +50,7 @@ CREATE TABLE IF NOT EXISTS orders (
     ordersID VARCHAR(16) PRIMARY KEY,
     customerID INT UNSIGNED,
     ordersDate DATE,
+    orderStatus VARCHAR(50) DEFAULT 'Comfirmed',
     subtotalPrice float(2) NOT NULL,
     shippingPrice float(2) NOT NULL,
     totalAmounts  INT UNSIGNED NOT NULL,
@@ -48,9 +59,9 @@ CREATE TABLE IF NOT EXISTS orders (
 
 CREATE TABLE IF NOT EXISTS products (
     productID VARCHAR(16) PRIMARY KEY,
-    name VARCHAR(255) UNIQUE NOT NULL,
+    name VARCHAR(255) NOT NULL,
     author VARCHAR(255) NOT NULL,
-    description VARCHAR(510) UNIQUE NOT NULL,
+    description VARCHAR(510) NOT NULL,
     type VARCHAR(255) NOT NULL,
     price float(2),
     stock INT NOT NULL
@@ -91,6 +102,7 @@ INSERT INTO products (productID, name, author, description, type, price, stock) 
 CREATE TABLE IF NOT EXISTS ordersProducts (
     ordersID VARCHAR(16),
     productID VARCHAR(16),
+    productName VARCHAR(255),
     quantity INT,
     PRIMARY KEY (ordersID, productID),
     FOREIGN KEY (ordersID) REFERENCES orders(ordersID),
@@ -125,5 +137,11 @@ CREATE TABLE IF NOT EXISTS wishList (
     PRIMARY KEY (productID, userID),
     FOREIGN KEY (userID) REFERENCES users(id),
     FOREIGN KEY (productID) REFERENCES products(productID)
+);
+
+CREATE TABLE IF NOT EXISTS feedbacks (
+	userID INT UNSIGNED NOT NULL,
+	feedback VARCHAR(5000),
+    FOREIGN KEY (userID) REFERENCES users(id)
 )
 

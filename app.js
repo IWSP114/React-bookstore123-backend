@@ -575,6 +575,54 @@ app.post('/api/create-feedback', async (req,res) => {
     }
 })
 
+app.get('/api/get-feedback', async (req,res) => {
+    let DBOP
+    try {
+        DBOP = await connectToSQL();
+
+        let query =  'SELECT * FROM feedbacks'; // Get feedbacks
+        const [results] = await DBOP.query(query);
+        
+        await DBOP.end(function(err) {
+            if (err) throw err; // Handle any errors during closing
+
+        });
+        res.status(200).json({ data: results })
+
+    } catch (error){  
+        console.log(error);
+        res.status(500).json( { message: 'Internal server error! '} );
+    }
+})
+
+app.get('/api/get-feedback/:feedbackID', async (req,res) => {
+    let DBOP
+    try {
+        const feedbackID = req.params.feedbackID;
+        DBOP = await connectToSQL();
+
+        let query =  
+        `
+        SELECT feedbackID, userID, feedback, username
+        FROM feedbacks 
+        INNER JOIN users
+        ON feedbacks.userID = users.id
+        WHERE feedbackID = ?
+        `
+        const [results] = await DBOP.query(query, [feedbackID]);
+        
+        await DBOP.end(function(err) {
+            if (err) throw err; // Handle any errors during closing
+
+        });
+        res.status(200).json({ data: results })
+
+    } catch (error){  
+        console.log(error);
+        res.status(500).json( { message: 'Internal server error! '} );
+    }
+})
+
 // Wishlist
 app.get('/api/get-wish-list-by-productID/:productID/:userID', async (req, res) => {
      

@@ -10,7 +10,7 @@ const fs = require('fs'); // To rename files
 const path = require('path');
 
 let corsOptions = {
-    origin: '*',
+    origin: 'http://localhost:5173',
     optionsSuccessStatus: 200, // some legacy browers (IE11, various SmartTVs) choke on 204
     allowedHeaders: ['Origin', 'X-Requested-With', 'Content-Type', 'Accept', 'x-client-key', 'x-client-token', 'x-client-secret', 'Authorization'],
     method: ['GET', 'POST', 'OPTION', 'PUT', 'DELETE', 'PUTCH']
@@ -19,8 +19,8 @@ app.use(cors(corsOptions));
 app.use('/products', express.static(path.join(__dirname, 'products')));
 
 const limiter = rateLimit({
-	windowMs: 60 * 1000, // 15 minutes
-	limit: 100, // Limit each IP to 100 requests per `window` (here, per 15 minutes).
+	windowMs: 60 * 1000, // 1 minutes
+	limit: 150, // Limit each IP to 150 requests per `window` (here, per 1 minutes).
 	message: 'Too many requests, please try again later.',
     standardHeaders: 'draft-7', // draft-6: `RateLimit-*` headers; draft-7: combined `RateLimit` header
 	legacyHeaders: false, // Disable the `X-RateLimit-*` headers.
@@ -511,7 +511,7 @@ app.get('/api/getOrder', async (req,res)=>{
         `
         SELECT ordersID, customerID, users.username as customerName, ordersDate, orderStatus, subtotalPrice, shippingPrice, totalAmounts 
         FROM orders
-        LEFT JOIN users
+        INNER JOIN users
         ON orders.customerID = users.id;
         `;
         const [results] = await DBOP.query(query);
@@ -623,6 +623,27 @@ app.get('/api/get-feedback/:feedbackID', async (req,res) => {
     }
 })
 
+app.delete('/api/delete-feedback/:feedbackID', async (req,res) => {
+    let DBOP
+    try {
+        const feedbackID = req.params.feedbackID;
+        DBOP = await connectToSQL();
+
+        let query =  `DELETE FROM feedbacks WHERE feedbackID = ?;`
+        const [results] = await DBOP.query(query, [feedbackID]);
+        
+        await DBOP.end(function(err) {
+            if (err) throw err; // Handle any errors during closing
+
+        });
+        res.status(200).json({ message: "Success!" })
+
+    } catch (error){  
+        console.log(error);
+        res.status(500).json( { message: 'Internal server error! '} );
+    }
+})
+
 // Wishlist
 app.get('/api/get-wish-list-by-productID/:productID/:userID', async (req, res) => {
      
@@ -709,7 +730,7 @@ app.get('/api/get-all-wish-list/:userID', async (req, res) => {
             products.price as productPrice,
             products.stock as productStock
         FROM wishList
-        LEFT JOIN products ON wishList.productID=products.productID
+        INNER JOIN products ON wishList.productID=products.productID
         WHERE wishList.userID = ?;
         `
         const [result] = await DBOP.query(query, [userID]);

@@ -1,3 +1,5 @@
+CREATE DATABASE bookstore;
+
 USE bookstore;
 
 DROP FUNCTION IF EXISTS generate_unique_random_OrdersID;

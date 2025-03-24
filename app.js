@@ -8,6 +8,8 @@ const cors = require('cors');
 const multer = require('multer');
 const fs = require('fs'); // To rename files
 const path = require('path');
+require('dotenv').config({ path: './.env' });
+const crypto = require('crypto');
 
 let corsOptions = {
     origin: 'http://localhost:5173',
@@ -17,6 +19,23 @@ let corsOptions = {
   }
 app.use(cors(corsOptions));
 app.use('/products', express.static(path.join(__dirname, 'products')));
+
+const secretKey = crypto.randomBytes(32);
+const iv = crypto.randomBytes(16);
+
+function encrypt(text) {
+    const cipher = crypto.createCipheriv('aes-256-cbc', secretKey, iv);
+    let encrypted = cipher.update(text, 'utf8', 'hex');
+    encrypted += cipher.final('hex');
+    return encrypted;
+}
+
+function decrypt(encrypted) {
+    const decipher = crypto.createDecipheriv('aes-256-cbc', secretKey, iv);
+    let decrypted = decipher.update(encrypted, 'hex', 'utf8');
+    decrypted += decipher.final('utf8');
+    return decrypted;
+}
 
 const limiter = rateLimit({
 	windowMs: 60 * 1000, // 1 minutes
@@ -62,6 +81,33 @@ async function connectToSQL() {
 }
 
 app.use(express.json());
+
+function sendMail(name, email, subject, message) {
+    const myHeaders = new Headers();
+    myHeaders.append("Content-Type", "application/json");
+    myHeaders.set('Authorization', 'Basic ' + btoa(process.env.API_KEY + ":" + process.env.SECRET_KEY));
+  
+    const data = JSON.stringify({
+      "Messages": [{
+        "From": {"Email": "ivanwong@gmail.com", "Name": "Bookstore 123"},
+        "To": [{"Email": email, "Name": name}],
+        "Subject": subject,
+        "TextPart": message
+      }]
+    });
+  
+    const requestOptions = {
+      method: 'POST',
+      headers: myHeaders,
+      body: data,
+    };
+  
+    fetch("https://api.mailjet.com/v3.1/send", requestOptions)
+      .then(response => response.text())
+      .then(result => console.log(result))
+      .catch(error => console.log('error', error));
+  }
+
 
 // User / Staff / Admin login
 app.post('/login', async (req, res)=> {
@@ -149,10 +195,70 @@ app.post('/register', async (req, res)=>{
     }
 })
 
+app.post('/lost-password', async (req,res) => {
+    try {
+        const email  = req.body.email; 
+        const email_encrypt =  encrypt(email)
+        console.log(email_encrypt);
+        const message = 
+`
+Dear Customer,
+
+Please ignore this message if you have not do the following action: password reset.
+
+If you have try to reset your password in our website, please click this URL to complete
+a password reset:
+
+http://localhost:5173/password-reset/${email_encrypt}
+
+Best Regards,
+Bookstore 123
+`
+        sendMail('User',email,'Password Reset',message)
+
+        return res.status(200).json( { message: 'successful!'} );
+    } catch  (error) {
+        console.log(error);
+    }
+})
+
+app.patch('/password-reset', async (req, res) => {
+    try {
+        const data = req.body;
+        //Check for all input
+        function CheckAllInput(ReqBody) {
+            const RequiredField = ['encryptedEmail', 'newPassword'];
+            return RequiredField.every(field=>ReqBody.hasOwnProperty(field));
+        }
+        if(!CheckAllInput(data)) {
+            return res.status(400).json( { message: 'Not inputed all the required field'} )
+        }
+        console.log(data.encryptedEmail);
+        const decrypted_email = decrypt(data.encryptedEmail);
+        console.log(decrypted_email)
+
+        const hashedPassword = await hashpassword.hashPassword(data.newPassword);
+
+        let DBOP = await connectToSQL();
+        let query = `UPDATE users SET password = ? WHERE email = ?;`;
+        let [results] = await DBOP.query(query, [hashedPassword ,decrypted_email]);
+
+        await DBOP.end(function(err) {
+            if (err) throw err; // Handle any errors during closing
+        });
+
+        return res.status(200).json( { message: 'successful!'} );
+
+    } catch (error) {
+        console.log(error);
+        res.status(500).json( { error: 'Internal Server Error' } );
+    }
+})
+
 //update user information but password
 app.patch('/updateUser/:username', async (req, res)=> { 
     try {
-        const { username } = req.params; // get it by jwt token
+        const { username } = req.params;
         const updates = req.body;
         if(!req.body) {
             res.status(400).json({message: 'Please make a change on profile.'});
@@ -259,7 +365,7 @@ app.get('/getProduct', async (req,res)=>{
         // Construct full image URLs
         const productsWithImages = results.map(product => ({
             ...product,
-            imageUrl: `http://localhost:5000/products/${product.productID}.jpg` // Adjust the URL as necessary
+            imageUrl: `http://localhost:3000/products/${product.productID}.jpg` // Adjust the URL as necessary
         }));
 
         res.status(200).json({ Products: productsWithImages })
@@ -283,7 +389,7 @@ app.get('/getProduct/:productID', async (req,res)=>{
         });
         const productsWithImages = results.map(product => ({
             ...product,
-            imageUrl: `http://localhost:5000/products/${product.productID}.jpg` // Adjust the URL as necessary
+            imageUrl: `http://localhost:3000/products/${product.productID}.jpg` // Adjust the URL as necessary
         }));
 
         res.status(200).json({ Products: productsWithImages })
@@ -298,6 +404,7 @@ app.post('/create-order', async (req,res) => {
     try {
 
         const {customerID, cart, subtotal, shipping, total} = req.body;
+        console.log(cart);
         const formattedDate = dayjs().format('YYYY-MM-DD');
 
         DBOP = await connectToSQL();
@@ -741,7 +848,7 @@ app.get('/api/get-all-wish-list/:userID', async (req, res) => {
 
         const productsWithImages = result.map(product => ({
             ...product,
-            imageUrl: `http://localhost:5000/products/${product.productID}.jpg` // Adjust the URL as necessary
+            imageUrl: `http://localhost:3000/products/${product.productID}.jpg` // Adjust the URL as necessary
         }));
 
         res.status(200).json({ products: productsWithImages });
@@ -752,6 +859,6 @@ app.get('/api/get-all-wish-list/:userID', async (req, res) => {
 })
 
 // Start the server
-app.listen(5000, () => {
-    console.log('Backend server running on port 5000');
+app.listen(3000, () => {
+    console.log('Backend server running on port 3000');
 });

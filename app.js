@@ -89,7 +89,7 @@ function sendMail(name, email, subject, message) {
   
     const data = JSON.stringify({
       "Messages": [{
-        "From": {"Email": "ivanwong@gmail.com", "Name": "Bookstore 123"},
+        "From": {"Email": "Your email", "Name": "Bookstore 123"},
         "To": [{"Email": email, "Name": name}],
         "Subject": subject,
         "TextPart": message

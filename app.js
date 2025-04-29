@@ -10,6 +10,12 @@ const fs = require('fs'); // To rename files
 const path = require('path');
 require('dotenv').config({ path: './.env' });
 const crypto = require('crypto');
+const { OpenAI } = require('openai');
+
+const openai = new OpenAI({
+    baseURL: 'https://api.deepseek.com',
+    apiKey: process.env.DEEPSEEK_KEY
+});
 
 let corsOptions = {
     origin: 'http://localhost:5173',
@@ -89,7 +95,7 @@ function sendMail(name, email, subject, message) {
   
     const data = JSON.stringify({
       "Messages": [{
-        "From": {"Email": "Your email", "Name": "Bookstore 123"},
+        "From": {"Email": "ivanwong.mt@gmail.com", "Name": "Bookstore 123"},
         "To": [{"Email": email, "Name": name}],
         "Subject": subject,
         "TextPart": message
@@ -852,6 +858,24 @@ app.get('/api/get-all-wish-list/:userID', async (req, res) => {
         }));
 
         res.status(200).json({ products: productsWithImages });
+    } catch (error) {
+        console.log(error);
+        res.status(500).json( { error: 'Internal Server Error' } );
+    }
+})
+
+app.post('/api/AI', async (req, res) => {
+
+    const { message } = req.body;
+    try {
+        const completion = await openai.chat.completions.create({
+            messages: [{ role: "system", content: message }],
+            model: "deepseek-chat",
+          });
+
+        console.log(completion.choices[0].message.content);
+
+        res.status(200).json({ message: completion.choices[0].message.content });
     } catch (error) {
         console.log(error);
         res.status(500).json( { error: 'Internal Server Error' } );
